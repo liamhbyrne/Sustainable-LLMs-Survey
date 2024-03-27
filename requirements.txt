@@ -1,0 +1,7 @@
+transformers
+bitsandbytes
+accelerate
+datasets
+git+https://github.com/huggingface/peft.git@8dd45b75d7eabe7ee94ecb6a19d552f2aa5e98c6
+wandb
+scipy
