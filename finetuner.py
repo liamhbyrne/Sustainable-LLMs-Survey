@@ -100,7 +100,7 @@ class PEFTFineTuner:
         self._model = AutoModelForCausalLM.from_pretrained(
             self._base_model_name,
             device_map='auto',
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch.bfloat16, 
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
@@ -124,14 +124,14 @@ class PEFTFineTuner:
         self._tokenizer.padding_side = "left"
 
         self._model = AutoModelForCausalLM.from_pretrained(
-            base_model,
-            load_in_8bit=True,
-            torch_dtype=torch.float16,
+            self._base_model_name,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            torch_dtype=torch.float16,  # Computations done in float16
             device_map="auto",
         )
         self._model.train()
         self._model = prepare_model_for_int8_training(self._model)
-        print("Model loaded.")
+        print("8 bit Model loaded.")
     
     def prepare_16bit_model(self):
         """
@@ -145,10 +145,11 @@ class PEFTFineTuner:
         self._tokenizer.padding_side = "left"
 
         self._model = AutoModelForCausalLM.from_pretrained(
-            base_model,
+            self._base_model_name,
             torch_dtype=torch.float16,
             device_map="auto",
         )
+        self._model.train()
         print("Model loaded.")
 
     def prepare_training_args(self, batch_size: int = 8, run_name: str = None):
@@ -156,15 +157,15 @@ class PEFTFineTuner:
         Set up the training arguments for the model.
         """
         print("Setting up training arguments...")
-        output_dir = f"checkpoints/{datetime.now().strftime('%Y-%m-%d-%H-%M')}"
+        output_dir = f"/scratch/lhb1g20/checkpoints/{run_name}{datetime.now().strftime('%Y-%m-%d-%Hh%Mm')}"
         self._training_args = TrainingArguments(
             per_device_train_batch_size=batch_size,
             per_device_eval_batch_size=batch_size,
             gradient_accumulation_steps=1,
-            num_train_epochs=1,
+            num_train_epochs=3,
             warmup_steps=100,
             learning_rate=3e-4,
-            fp16=True,
+            # fp16=True,
             logging_steps=10,
             optim="paged_adamw_32bit",
             evaluation_strategy="steps",
@@ -174,7 +175,7 @@ class PEFTFineTuner:
             output_dir=output_dir,
             group_by_length=True,
             report_to="wandb",
-            run_name=f"{run_name}-codellama-{datetime.now().strftime('%Y-%m-%d-%H-%M')}",
+            run_name=f"{run_name}-{datetime.now().strftime('%Y-%m-%d-%H-%M')}",
         )
         print("Training arguments set.")
     
@@ -216,9 +217,6 @@ class PEFTFineTuner:
 
         PEFTFineTuner.print_trainable_parameters(self._model)
 
-        # Print number of trainable parameters
-        print(f"Number of trainable parameters: {sum(p.numel() for p in self._model.parameters() if p.requires_grad)}")
-
         if torch.cuda.device_count() > 1:
             self._model.is_parallelizable = True
             self._model.model_parallel = True
@@ -235,13 +233,6 @@ class PEFTFineTuner:
 
         # Pytorch Optimizations
         self._model.config.use_cache = False
-        old_state_dict = self._model.state_dict
-        self._model.state_dict = (lambda self, *_, **__: get_peft_model_state_dict(self, old_state_dict())).__get__(
-            self._model, type(self._model)
-        )
-        if torch.__version__ >= "2" and sys.platform != "win32":
-            print("compiling the model")
-            self._model = torch.compile(self._model)
 
         # GO!
         self._trainer.train()
@@ -275,6 +266,8 @@ if __name__ == "__main__":
 
     fine_tuner.prepare_datasets()
 
-    BATCH_SIZE = 4
-    fine_tuner.prepare_training_args(batch_size=BATCH_SIZE, run_name="LoRA-int8-13B-batch4")
+    BATCH_SIZE = 2
+    RUN_NAME = "EXPERIMENT-2-LoRA-int8-13B-bat2"
+    print(f"CONFIGURATION for {RUN_NAME}:\nSize {SIZE}\nBatch {BATCH_SIZE}\n Bits {BITS}")
+    fine_tuner.prepare_training_args(batch_size=BATCH_SIZE, run_name=RUN_NAME)
     fine_tuner.train() 
